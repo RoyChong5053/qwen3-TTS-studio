@@ -291,12 +291,35 @@ Notes:
 | Ono Anna | Lively Japanese female | Japanese |
 | Sohee | Warm Korean female, rich emotion | Korean |
 
+## Dark Theme
+
+This fork features a unified dark theme for a professional look and reduced eye strain.
+
+- **Color Palette**: Deep blue-gray backgrounds with vibrant accent colors
+- **External CSS**: Theme is loaded from `static/dark-theme.css` for easy customization
+- **Backup System**: Run `./backup/restore-dark-theme.sh` after `git pull` to restore theme
+
+### Theme Colors
+
+| Role | Color | Usage |
+|------|-------|-------|
+| Background | `#0d0d14` → `#2a2a40` | Page, panels, cards |
+| Text | `#f0f0f5` / `#8888a0` | Bright / muted text |
+| Accent Blue | `#8080ff` | Primary actions, links |
+| Accent Green | `#50c878` | Success states |
+| Accent Orange | `#ffb432` | Warnings, highlights |
+
 ## Project Structure
 
 ```
 qwen3-TTS-studio/
 ├── qwen_tts_ui.py              # Main entry point
 ├── config.py                   # Configuration
+├── static/                     # Static assets
+│   └── dark-theme.css          # Dark theme styles
+├── backup/                     # Theme backup for git pull protection
+│   ├── restore-dark-theme.sh   # Restore script
+│   └── *.py, *.css             # Backup files
 │
 ├── ui/                         # UI Components
 │   ├── content_input.py        # Content input section
