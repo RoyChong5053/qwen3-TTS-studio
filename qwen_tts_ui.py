@@ -1540,6 +1540,84 @@ def generate_custom_voice(
         _gpu_cleanup()
 
 
+def generate_novel(
+    text,
+    txt_file,
+    model_name,
+    speaker,
+    language,
+    instruct,
+    chunk_size,
+    seed,
+    temperature,
+    progress=gr.Progress(),
+):
+    """Generate novel audio from long text with tone consistency."""
+    import tempfile
+    from pathlib import Path
+    from audio.novel_reader import NovelReader
+
+    # Get text from input or file
+    if txt_file is not None:
+        try:
+            text = Path(txt_file).read_text(encoding="utf-8").strip()
+        except Exception as e:
+            raise gr.Error(f"读取文件失败: {e}")
+
+    if not text or not text.strip():
+        raise gr.Error("请输入文本或上传 TXT 文件")
+
+    text = text.strip()
+    char_count = len(text)
+
+    progress(0.05, desc="初始化 Novel Reader...")
+
+    reader = NovelReader(
+        model_name=model_name,
+        speaker=speaker,
+        language=language if language != "auto" else "Auto",
+        instruct=instruct or "",
+        seed=int(seed) if seed else 42,
+        temperature=float(temperature),
+        top_k=30,
+        top_p=0.85,
+        repetition_penalty=1.0,
+        chunk_size=int(chunk_size),
+    )
+
+    progress(0.1, desc=f"分块处理 {char_count} 字...")
+
+    # Create temp output path
+    with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
+        output_mp3 = Path(f.name)
+
+    # Custom progress callback
+    def _progress(current, total, msg):
+        pct = 0.1 + (current / max(total, 1)) * 0.8
+        progress(pct, desc=msg)
+
+    try:
+        success, result, chunks = reader.synthesize_to_mp3(
+            text, output_mp3, progress_fn=_progress
+        )
+
+        if not success:
+            raise gr.Error(f"合成失败: {result}")
+
+        progress(0.95, desc="生成完成！")
+
+        status = f"✅ 完成！共 {len(chunks)} 块，{char_count} 字 → {output_mp3.name}"
+
+        progress(1.0, desc="Done!")
+        return str(output_mp3), status, str(output_mp3)
+
+    except Exception as e:
+        if output_mp3.exists():
+            output_mp3.unlink()
+        error_msg = str(e) if isinstance(e, gr.Error) else f"生成失败: {e}"
+        raise gr.Error(error_msg)
+
+
 def generate_voice_design(
     text,
     voice_description,
@@ -3553,7 +3631,119 @@ with gr.Blocks(title="Qwen3-TTS Studio", css=custom_css) as demo:
                     )
 
                     persona_refresh_gallery_btn.click(
-                        fn=on_persona_refresh_gallery, outputs=[personas_gallery]
+                         fn=on_persona_refresh_gallery, outputs=[personas_gallery]
+                     )
+
+                with gr.TabItem("📖 Novel Reader", id="novel"):
+                    gr.HTML('<div class="section-header">Novel Text Input</div>')
+
+                    with gr.Row():
+                        with gr.Column(scale=1):
+                            gr.HTML('<div class="section-header">Settings</div>')
+
+                            novel_model = gr.Radio(
+                                ["1.7B-CustomVoice", "0.6B-CustomVoice"],
+                                value="1.7B-CustomVoice",
+                                label="Model",
+                                info="1.7B: Higher quality | 0.6B: Faster",
+                            )
+                            novel_speaker = gr.Dropdown(
+                                choices=_get_preset_speaker_choices(),
+                                value="serena",
+                                label="Voice",
+                            )
+                            novel_language = gr.Dropdown(
+                                choices=LANGUAGES,
+                                value="auto",
+                                label="Language",
+                            )
+                            novel_instruct = gr.Textbox(
+                                label="Voice Style",
+                                placeholder="例: 用稳定的叙述语气朗读小说，保持情感连贯",
+                                lines=2,
+                                info="Optional instruction for tone consistency",
+                            )
+                            novel_chunk_size = gr.Slider(
+                                minimum=100,
+                                maximum=1000,
+                                value=500,
+                                step=50,
+                                label="Chunk Size (chars)",
+                                info="Larger = fewer chunks = more consistent",
+                            )
+                            novel_seed = gr.Number(
+                                value=42,
+                                label="Random Seed",
+                                info="Fixed seed for tone consistency",
+                                precision=0,
+                            )
+                            novel_temperature = gr.Slider(
+                                minimum=0.1,
+                                maximum=1.0,
+                                value=0.25,
+                                step=0.05,
+                                label="Temperature",
+                                info="Lower = more consistent tone",
+                            )
+
+                        with gr.Column(scale=2):
+                            gr.HTML('<div class="section-header">Text Input</div>')
+
+                            novel_text = gr.Textbox(
+                                label="Novel Text",
+                                placeholder="粘贴小说文本，或上传 TXT 文件...",
+                                lines=10,
+                                max_lines=50,
+                            )
+                            novel_file = gr.File(
+                                label="Or Upload TXT File",
+                                file_types=[".txt"],
+                                type="filepath",
+                            )
+
+                            novel_btn = gr.Button(
+                                "Generate Novel Audio",
+                                variant="primary",
+                                elem_classes=["generate-btn"],
+                                size="lg",
+                            )
+
+                            novel_status = gr.Textbox(
+                                label="Status",
+                                interactive=False,
+                                value="Ready to generate...",
+                            )
+
+                            novel_audio = gr.Audio(
+                                label="Generated Audio (WAV Preview)",
+                                type="filepath",
+                            )
+
+                            novel_download = gr.File(
+                                label="Download MP3",
+                                type="filepath",
+                            )
+
+                    novel_btn.click(
+                        fn=_disable_btn,
+                        outputs=[novel_btn],
+                        queue=False,
+                        show_progress="hidden",
+                    ).then(
+                        fn=generate_novel,
+                        inputs=[
+                            novel_text, novel_file, novel_model, novel_speaker,
+                            novel_language, novel_instruct, novel_chunk_size,
+                            novel_seed, novel_temperature,
+                        ],
+                        outputs=[novel_audio, novel_status, novel_download],
+                        concurrency_limit=1,
+                        concurrency_id="generation",
+                    ).then(
+                        fn=_enable_btn,
+                        outputs=[novel_btn],
+                        queue=False,
+                        show_progress="hidden",
                     )
 
                 with gr.TabItem("Podcast", id="podcast"):
@@ -6216,4 +6406,4 @@ if __name__ == "__main__":
     demo.queue(default_concurrency_limit=1)
     server_name = os.getenv("GRADIO_SERVER_NAME", "127.0.0.1")
     server_port = int(os.getenv("GRADIO_SERVER_PORT", "7860"))
-    demo.launch(server_name=server_name, server_port=server_port)
+    demo.launch(server_name="0.0.0.0", server_port=server_port, share=False)
